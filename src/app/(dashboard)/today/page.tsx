@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { getCurrentUserId } from "@/server/auth/session";
 import { TaskViewContent } from "../_components/task-view-content";
 import { ViewListSkeleton } from "@/features/views/components/view-list-skeleton";
+import { QuickAddTaskForm } from "@/features/tasks/components/quick-add-task-form";
 
 export const revalidate = 0;
 
@@ -22,6 +23,7 @@ export default async function TodayViewPage() {
           Prioritize tasks scheduled for the next 24 hours.
         </p>
       </header>
+      <QuickAddTaskForm view="today" />
       <Suspense fallback={<ViewListSkeleton />}>
         <TaskViewContent
           userId={userId}
