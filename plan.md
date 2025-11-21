@@ -108,24 +108,25 @@ Include fixtures + factories in [`tests/factories`](tests/factories) and run via
 ## 9. Implementation Roadmap
 
 - [x] **Foundation & Tooling**
-    - [x] Initialize Next.js (App Router) with Bun, Tailwind, shadcn/ui, Drizzle, testing harness.
-    - [x] Configure linting, formatting, CI pipeline, environment management.
-- [ ] **Database & Services** _(partial: schema + core list/label/task/reminder services drafted, migrations generated; audit/search/NLP still pending)_
-    - [x] Define schema + migrations, write service layer for lists, tasks, labels, reminders (initial versions).
-    - [ ] Implement audit log UI hooks + triggers for FTS + change history.
+  - [x] Initialize Next.js (App Router) with Bun, Tailwind, shadcn/ui, Drizzle, testing harness.
+  - [x] Configure linting, formatting, CI pipeline, environment management.
+- [x] **Database & Services** _(complete: schema + core list/label/task/reminder services plus audit log + FTS/NLP foundations)_
+  - [x] Define schema + migrations, write service layer for lists, tasks, labels, reminders (initial versions).
+  - [x] Implement audit log UI hooks + triggers for FTS + change history _(audit-service wired with timeline UI + Drizzle triggers)_.
 - [ ] **Core UI Layout & Navigation**
-    - [ ] Build dashboard layout, sidebar, view routes (Today, Next 7, Upcoming, All) with server data fetching.
-    - [ ] Implement list/label CRUD modals.
+  - [x] Build dashboard layout, sidebar, view routes (Today, Next 7, Upcoming, All) with server data fetching _(layout + route segments shipped)_."
+  - [ ] Implement list/label CRUD modals.
 - [ ] **Task CRUD & Logging**
-    - [ ] Quick add bar, detailed task drawer, subtasks, attachments, change log UI.
-    - [ ] Form validation, optimistic updates, View Transitions.
+  - [ ] Quick add bar, detailed task drawer, subtasks, attachments, change log UI.
+  - [ ] Form validation, optimistic updates, View Transitions.
 - [ ] **Search + NLP + Suggestions**
-    - [ ] Command palette with fuzzy search, NLP parser integration, scheduler suggestion surface.
+  - [x] Command palette with fuzzy search + NLP parser foundations (SQLite FTS + chrono-node grammar).
+  - [ ] Scheduler suggestion surface + acceptance flow.
 - [ ] **Reminders & Notifications**
-    - [ ] Reminder CRUD, dispatcher worker, in-app notifications.
+  - [ ] Reminder CRUD, dispatcher worker, in-app notifications.
 - [ ] **Polish & Stretch**
-    - [ ] Animations, micro-interactions, performance tuning, responsive tweaks, accessibility sweeps.
-    - [ ] Complete Bun Test/Playwright suites, add Lighthouse regression.
+  - [ ] Animations, micro-interactions, performance tuning, responsive tweaks, accessibility sweeps.
+  - [ ] Complete Bun Test/Playwright suites, add Lighthouse regression.
 
 Each milestone ends with regression + accessibility review before proceeding.
 

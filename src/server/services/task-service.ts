@@ -1,13 +1,12 @@
-import { and, desc, eq, gt, gte, lte, type SQL } from "drizzle-orm";
+import { and, desc, eq, gt, gte, lte, sql, type SQL } from "drizzle-orm";
 
+import { db, reminders, subtasks, taskLabels, tasks } from "@/server/db";
 import {
-  db,
-  reminders,
-  subtasks,
-  taskChangeLog,
-  taskLabels,
-  tasks,
-} from "@/server/db";
+  AuditAction,
+  AuditEntityType,
+  createAuditLogger,
+  type AuditValue,
+} from "@/server/services/audit-service";
 import {
   CreateTaskInput,
   UpdateTaskInput,
@@ -23,25 +22,28 @@ const toMinutes = (value?: string | null) => {
   return hours * 60 + minutes;
 };
 
-function recordChange(
-  taskId: string,
-  field: string,
-  previousValue: unknown,
-  newValue: unknown,
-  userId: string
+const audit = createAuditLogger("task");
+async function recordAudit(
+  entityType: AuditEntityType,
+  entityId: string,
+  userId: string,
+  action: AuditAction,
+  payload: {
+    field?: string;
+    previousValue?: AuditValue;
+    newValue?: AuditValue;
+    taskId?: string | null;
+  }
 ) {
-  if (JSON.stringify(previousValue) === JSON.stringify(newValue)) return;
-  return db
-    .insert(taskChangeLog)
-    .values({
-      id: crypto.randomUUID(),
-      taskId,
-      changedBy: userId,
-      field,
-      previousValue: previousValue ? JSON.stringify(previousValue) : null,
-      newValue: newValue ? JSON.stringify(newValue) : null,
-    })
-    .execute();
+  return audit({
+    entityId,
+    userId,
+    action,
+    field: payload.field,
+    previousValue: payload.previousValue,
+    newValue: payload.newValue,
+    taskId: payload.taskId ?? entityId,
+  });
 }
 
 export async function listTasksByView(
@@ -81,7 +83,11 @@ export async function listTasksByView(
 
   const predicate = where ?? filters[0];
 
-  return db.select().from(tasks).where(predicate).orderBy(desc(tasks.updatedAt));
+  return db
+    .select()
+    .from(tasks)
+    .where(predicate)
+    .orderBy(desc(tasks.updatedAt));
 }
 
 export async function getTask(userId: string, taskId: string) {
@@ -191,6 +197,12 @@ export async function createTask(userId: string, input: CreateTaskInput) {
   await syncSubtasks(id, subtaskInput);
   await syncReminders(id, reminderInput);
 
+  await recordAudit("task", id, userId, "insert", {
+    field: undefined,
+    newValue: payload,
+    taskId: id,
+  });
+
   return getTask(userId, id);
 }
 
@@ -203,7 +215,12 @@ export async function updateTask(userId: string, input: UpdateTaskInput) {
   const subtaskInput = normalizeSubtasks(payload.subtasks);
   const reminderInput = normalizeReminders(payload.reminders);
 
-  await recordChange(payload.id, "task", current, payload, userId);
+  await recordAudit("task", payload.id, userId, "update", {
+    field: undefined,
+    previousValue: current,
+    newValue: payload,
+    taskId: payload.id,
+  });
 
   await db
     .update(tasks)
@@ -227,8 +244,92 @@ export async function updateTask(userId: string, input: UpdateTaskInput) {
 }
 
 export async function deleteTask(userId: string, taskId: string) {
-  await getTask(userId, taskId);
+  const existing = await getTask(userId, taskId);
   await db
     .delete(tasks)
     .where(and(eq(tasks.id, taskId), eq(tasks.userId, userId)));
+  await recordAudit("task", taskId, userId, "delete", {
+    field: undefined,
+    previousValue: existing,
+    taskId,
+  });
+}
+
+function buildWhere(filters: SQL<unknown>[]) {
+  if (filters.length === 0) {
+    throw new Error("buildWhere requires at least one filter");
+  }
+
+  let predicate: SQL<unknown> = filters[0];
+  for (let i = 1; i < filters.length; i += 1) {
+    predicate = and(predicate, filters[i])!;
+  }
+  return predicate;
+}
+
+async function countWithFilters(filters: SQL<unknown>[]) {
+  const [result] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(tasks)
+    .where(buildWhere(filters));
+  return result?.count ?? 0;
+}
+
+export async function countTasksByView(userId: string) {
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const endOfToday = new Date(startOfToday);
+  endOfToday.setHours(23, 59, 59, 999);
+  const endOfNextSeven = new Date(endOfToday);
+  endOfNextSeven.setDate(endOfNextSeven.getDate() + 7);
+
+  const baseFilter = eq(tasks.userId, userId);
+
+  const [today, next7, upcoming, all] = await Promise.all([
+    countWithFilters([
+      baseFilter,
+      gte(tasks.scheduledDate, startOfToday),
+      lte(tasks.scheduledDate, endOfToday),
+    ]),
+    countWithFilters([
+      baseFilter,
+      gte(tasks.scheduledDate, startOfToday),
+      lte(tasks.scheduledDate, endOfNextSeven),
+    ]),
+    countWithFilters([baseFilter, gt(tasks.scheduledDate, endOfToday)]),
+    countWithFilters([baseFilter]),
+  ]);
+
+  return { today, next7, upcoming, all } as const;
+}
+
+export async function countTasksPerList(userId: string) {
+  const rows = await db
+    .select({ listId: tasks.listId, count: sql<number>`count(*)` })
+    .from(tasks)
+    .where(eq(tasks.userId, userId))
+    .groupBy(tasks.listId);
+
+  return rows.reduce<Record<string, number>>((acc, row) => {
+    if (row.listId) {
+      acc[row.listId] = row.count ?? 0;
+    }
+    return acc;
+  }, {});
+}
+
+export async function countTasksPerLabel(userId: string) {
+  const rows = await db
+    .select({ labelId: taskLabels.labelId, count: sql<number>`count(*)` })
+    .from(taskLabels)
+    .innerJoin(tasks, eq(taskLabels.taskId, tasks.id))
+    .where(eq(tasks.userId, userId))
+    .groupBy(taskLabels.labelId);
+
+  return rows.reduce<Record<string, number>>((acc, row) => {
+    if (row.labelId) {
+      acc[row.labelId] = row.count ?? 0;
+    }
+    return acc;
+  }, {});
 }

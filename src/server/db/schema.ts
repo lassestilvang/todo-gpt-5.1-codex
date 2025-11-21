@@ -1,10 +1,8 @@
 import { sql } from "drizzle-orm";
 import {
-  blob,
   index,
   integer,
   primaryKey,
-  real,
   sqliteTable,
   text,
   uniqueIndex,
@@ -229,27 +227,103 @@ export const availabilityBlocks = sqliteTable("availability_blocks", {
   note: text("note"),
 });
 
-export const taskChangeLog = sqliteTable("task_change_log", {
-  id: text("id").primaryKey(),
-  taskId: text("task_id")
-    .notNull()
-    .references(() => tasks.id, { onDelete: "cascade" }),
-  changedBy: text("changed_by")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  field: text("field").notNull(),
-  previousValue: text("previous_value"),
-  newValue: text("new_value"),
-  changedAt: integer("changed_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`CURRENT_TIMESTAMP`),
-});
+export const taskChangeLog = sqliteTable(
+  "task_change_log",
+  {
+    id: text("id").primaryKey(),
+    entityType: text("entity_type").notNull(),
+    entityId: text("entity_id").notNull(),
+    taskId: text("task_id"),
+    changedBy: text("changed_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    action: text("action").notNull(),
+    field: text("field").notNull(),
+    previousValue: text("previous_value"),
+    newValue: text("new_value"),
+    changedAt: integer("changed_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    entityIdx: index("task_change_log_entity_idx").on(
+      table.entityType,
+      table.entityId,
+      table.changedAt
+    ),
+    taskIdx: index("task_change_log_task_idx").on(
+      table.taskId,
+      table.changedAt
+    ),
+  })
+);
+
+export const AUDIT_ENTITY_TYPES = [
+  "task",
+  "subtask",
+  "reminder",
+  "label",
+  "list",
+] as const;
+export type AuditEntityType = (typeof AUDIT_ENTITY_TYPES)[number];
+
+export const AUDIT_ACTIONS = ["insert", "update", "delete"] as const;
+export type AuditAction = (typeof AUDIT_ACTIONS)[number];
+
+export const AUDIT_ENTITY_FIELD = "__entity__" as const;
+
+export type AuditEntityDescriptor = {
+  field: string;
+  resolveTaskId?: (
+    record?: Record<string, unknown> | null
+  ) => string | null | undefined;
+};
+
+export const AUDIT_ENTITY_CONFIG: Record<
+  AuditEntityType,
+  AuditEntityDescriptor
+> = {
+  task: {
+    field: AUDIT_ENTITY_FIELD,
+    resolveTaskId: (record) => (record?.id as string) ?? null,
+  },
+  subtask: {
+    field: "subtask",
+    resolveTaskId: (record) => (record?.taskId as string) ?? null,
+  },
+  reminder: {
+    field: "reminder",
+    resolveTaskId: (record) => (record?.taskId as string) ?? null,
+  },
+  label: {
+    field: "label",
+  },
+  list: {
+    field: "list",
+  },
+} as const;
+
+export function resolveAuditTaskId(
+  entityType: AuditEntityType,
+  record?: Record<string, unknown> | null,
+  fallbackTaskId?: string | null
+) {
+  const descriptor = AUDIT_ENTITY_CONFIG[entityType];
+  const taskId = descriptor?.resolveTaskId?.(record);
+  return taskId ?? fallbackTaskId ?? null;
+}
 
 export const ftsTasks = sqliteTable("fts_tasks", {
   rowid: integer("rowid").primaryKey({ autoIncrement: true }),
+  taskId: text("task_id"),
+  userId: text("user_id"),
+  listId: text("list_id"),
   title: text("title"),
   description: text("description"),
+  listName: text("list_name"),
+  listColor: text("list_color"),
   labels: text("labels"),
+  priority: text("priority"),
 });
 
 export const syncStates = sqliteTable("sync_states", {

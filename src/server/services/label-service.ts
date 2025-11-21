@@ -1,6 +1,7 @@
 import { and, eq } from "drizzle-orm";
 
 import { db, labels } from "@/server/db";
+import { createAuditLogger, type AuditValue } from "@/server/services/audit-service";
 import {
   CreateLabelInput,
   UpdateLabelInput,
@@ -9,6 +10,23 @@ import {
 } from "@/schemas/label";
 
 export class LabelServiceError extends Error {}
+
+const auditLabel = createAuditLogger("label");
+
+async function logLabelChange(
+  action: "insert" | "update" | "delete",
+  userId: string,
+  labelId: string,
+  payload: { previousValue?: AuditValue; newValue?: AuditValue }
+) {
+  await auditLabel({
+    entityId: labelId,
+    userId,
+    action,
+    previousValue: payload.previousValue,
+    newValue: payload.newValue,
+  });
+}
 
 export async function getLabels(userId: string) {
   return db.select().from(labels).where(eq(labels.userId, userId));
@@ -35,6 +53,8 @@ export async function createLabel(userId: string, input: CreateLabelInput) {
     ...payload,
   });
 
+  await logLabelChange("insert", userId, id, { newValue: payload });
+
   return getLabel(userId, id);
 }
 
@@ -54,7 +74,7 @@ export async function getLabel(userId: string, labelId: string) {
 
 export async function updateLabel(userId: string, input: UpdateLabelInput) {
   const payload = updateLabelSchema.parse(input);
-  await getLabel(userId, payload.id);
+  const current = await getLabel(userId, payload.id);
 
   await db
     .update(labels)
@@ -64,12 +84,18 @@ export async function updateLabel(userId: string, input: UpdateLabelInput) {
     })
     .where(and(eq(labels.id, payload.id), eq(labels.userId, userId)));
 
+  await logLabelChange("update", userId, payload.id, {
+    previousValue: current,
+    newValue: payload,
+  });
+
   return getLabel(userId, payload.id);
 }
 
 export async function deleteLabel(userId: string, labelId: string) {
-  await getLabel(userId, labelId);
+  const current = await getLabel(userId, labelId);
   await db
     .delete(labels)
     .where(and(eq(labels.id, labelId), eq(labels.userId, userId)));
+  await logLabelChange("delete", userId, labelId, { previousValue: current });
 }

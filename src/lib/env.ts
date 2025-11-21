@@ -1,4 +1,4 @@
-const requiredEnv = ["DATABASE_URL"] as const;
+export const requiredEnv = ["DATABASE_URL"] as const;
 
 type RequiredEnv = (typeof requiredEnv)[number];
 

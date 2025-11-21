@@ -1,6 +1,8 @@
 import { eq, and } from "drizzle-orm";
+import crypto from "crypto";
 
 import { db, lists } from "@/server/db";
+import { createAuditLogger, type AuditValue } from "@/server/services/audit-service";
 import {
   CreateListInput,
   UpdateListInput,
@@ -9,6 +11,23 @@ import {
 } from "@/schemas/list";
 
 export class ListServiceError extends Error {}
+
+const auditList = createAuditLogger("list");
+
+async function logListChange(
+  action: "insert" | "update" | "delete",
+  userId: string,
+  listId: string,
+  payload: { previousValue?: AuditValue; newValue?: AuditValue }
+) {
+  await auditList({
+    entityId: listId,
+    userId,
+    action,
+    previousValue: payload.previousValue,
+    newValue: payload.newValue,
+  });
+}
 
 function assertNotSystem(list: typeof lists.$inferSelect) {
   if (list.isSystem) {
@@ -48,6 +67,8 @@ export async function createList(userId: string, input: CreateListInput) {
     ...payload,
   });
 
+  await logListChange("insert", userId, id, { newValue: payload });
+
   return getListById(userId, id);
 }
 
@@ -64,6 +85,11 @@ export async function updateList(userId: string, input: UpdateListInput) {
     })
     .where(and(eq(lists.id, payload.id), eq(lists.userId, userId)));
 
+  await logListChange("update", userId, payload.id, {
+    previousValue: current,
+    newValue: payload,
+  });
+
   return getListById(userId, payload.id);
 }
 
@@ -73,4 +99,5 @@ export async function deleteList(userId: string, listId: string) {
   await db
     .delete(lists)
     .where(and(eq(lists.id, listId), eq(lists.userId, userId)));
+  await logListChange("delete", userId, listId, { previousValue: current });
 }

@@ -1,6 +1,7 @@
 import { and, eq, gte, lt } from "drizzle-orm";
 
 import { db, reminders, tasks } from "@/server/db";
+import { createAuditLogger, type AuditValue } from "@/server/services/audit-service";
 import {
   CreateReminderInput,
   UpdateReminderInput,
@@ -9,6 +10,25 @@ import {
 } from "@/schemas/reminder";
 
 export class ReminderServiceError extends Error {}
+
+const auditReminder = createAuditLogger("reminder");
+
+async function logReminderChange(
+  action: "insert" | "update" | "delete",
+  userId: string,
+  reminderId: string,
+  taskId: string,
+  payload: { previousValue?: AuditValue; newValue?: AuditValue }
+) {
+  await auditReminder({
+    entityId: reminderId,
+    taskId,
+    userId,
+    action,
+    previousValue: payload.previousValue,
+    newValue: payload.newValue,
+  });
+}
 
 export async function listRemindersForTask(userId: string, taskId: string) {
   await assertTaskOwnership(userId, taskId);
@@ -29,6 +49,10 @@ export async function createReminder(
     remindAt: new Date(payload.remindAt),
     channel: payload.channel,
     status: "scheduled",
+  });
+
+  await logReminderChange("insert", userId, id, payload.taskId, {
+    newValue: payload,
   });
 
   return getReminder(userId, id);
@@ -70,12 +94,20 @@ export async function updateReminder(
     })
     .where(eq(reminders.id, payload.id));
 
+  await logReminderChange("update", userId, payload.id, reminder.taskId, {
+    previousValue: reminder,
+    newValue: payload,
+  });
+
   return getReminder(userId, payload.id);
 }
 
 export async function deleteReminder(userId: string, reminderId: string) {
-  await getReminder(userId, reminderId);
+  const reminder = await getReminder(userId, reminderId);
   await db.delete(reminders).where(eq(reminders.id, reminderId));
+  await logReminderChange("delete", userId, reminderId, reminder.taskId, {
+    previousValue: reminder,
+  });
 }
 
 export async function fetchDueReminders(windowMinutes = 5) {
